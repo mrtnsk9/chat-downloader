@@ -1541,6 +1541,32 @@ class YouTubeChatDownloader(BaseChatDownloader):
         else:
             details['status'] = 'past'
 
+        client_continuation = multi_get(
+            yt_initial_data, 'contents', 'twoColumnWatchNextResults',
+            'conversationBar', 'liveChatRenderer', 'continuations', 0,
+            'reloadContinuationData', 'continuation')
+        if client_continuation:
+            chat_type = 'live_chat_replay' if details['status'] == 'past' else 'live_chat'
+            chat_url = f'{self._YT_HOME}/{chat_type}?continuation={client_continuation}'
+            response = self._session_get(chat_url)
+            response.raise_for_status()
+            chat_data = try_parse_json(
+                regex_search(response.text, self._YT_INITIAL_DATA_RE))
+            submenu_items = multi_get(
+                chat_data, 'continuationContents', 'liveChatContinuation',
+                'header', 'liveChatHeaderRenderer', 'viewSelector',
+                'sortFilterSubMenuRenderer', 'subMenuItems')
+            if not submenu_items or len(submenu_items) < 2:
+                raise ParsingError('Unable to parse YouTube live chat continuations.')
+
+            for (title, _), item in zip(
+                    details['continuation_info'].items(), submenu_items):
+                continuation = multi_get(
+                    item, 'continuation', 'reloadContinuationData', 'continuation')
+                if not continuation:
+                    raise ParsingError('YouTube live chat continuation is missing.')
+                details['continuation_info'][title] = continuation
+
         return details, player_response_info, yt_initial_data, ytcfg
 
     def _get_initial_video_info(self, video_id, params=None, video_type='video'):
